@@ -88,15 +88,31 @@ instance-encoding files for their stack (repo-specific content, universal princi
 
 ## Keeping it consistent (the discipline)
 
-- **Author/change a universal file HERE first** (`jcvgconsulting-platform`), then mirror it
-  verbatim to every repo of the applicable kind — same bytes, same path
+- **Author/change a universal file HERE first** (`jcvgconsulting-platform`), then propagate
+  it verbatim to every repo of the applicable kind — same bytes, same path
   (`.kiro/steering/<file>.md`). A universal change is not "done" until every applicable repo
-  carries the new bytes.
-- **Verify by equality, not by eye.** Drift = a universal file whose hash differs from the
-  canonical copy, or a repo of a kind that is MISSING a universal file. A small check
-  script (future: `scripts/steering-audit`) should enumerate each repo, hash each universal
-  file against this canonical set, and report missing/divergent — a repo failing the audit
-  is a finding, same as a failing isolation gate.
+  carries the new bytes. **`jcvgconsulting-platform` is the UNAMBIGUOUS source of truth:** a
+  local edit to a universal file in any OTHER repo is pointless — the next sync clobbers it.
+  The rule "only ever edit a universal file in platform" is enforced by that fact, not by
+  good intentions.
+- **The mechanism is a detector + a corrector, both in `scripts/`:**
+  - `scripts/steering-audit.ps1` — the **detector / dry-run**. Hashes each target against
+    canonical and reports per (repo, file): OK / DRIFT / MISSING. Read-only; writes a report
+    to a gitignored `.scratch/` and a one-line summary. "Verify by equality, not by eye":
+    drift = a universal file whose hash differs from canonical, or a repo of a kind MISSING
+    a universal file — a repo failing the audit is a finding, same severity as a failing
+    isolation gate.
+  - `scripts/steering-sync.ps1` — the **corrector / apply**. Copies every canonical universal
+    into every applicable repo, overwriting drift and creating missing files; it re-hashes
+    each copy to confirm it landed byte-identical. Run it with `-WhatIf` first (shows
+    WOULD-COPY / SKIP, changes nothing). It does NOT commit — review each repo's
+    `git status`/diff (a universal-steering change touches ONLY `.kiro/steering/`) and commit
+    deliberately.
+  - **The two share the SAME canonical set and the SAME repo-by-kind target lists** so
+    detector and corrector stay in lockstep. Changing one list means changing both.
+  - **The loop:** change canonical in platform → `steering-sync.ps1` (optionally `-WhatIf`
+    first) → commit the touched repos → `steering-audit.ps1` verifies green (OK=all,
+    DRIFT=0, MISSING=0).
 - **A new universal rule is added to the manifest above in the SAME change** that creates
   the file, so the audit knows to expect it everywhere.
 - **Tailoring happens ONLY in the declared repo-specific files.** If you find yourself
@@ -107,12 +123,23 @@ instance-encoding files for their stack (repo-specific content, universal princi
 
 ## Status
 
-The universal set above is the TARGET. Today the fleet is partially consistent
-(`shell-discipline.md` and `product.md` are near-universal; `isolation`/`identity`/
-`repo-architecture`/`kb-structure` currently live only in `jcvgconsulting-platform`;
-`search-discipline`/`security`/`workflow-worktree-cleanup`/`msp-repo-model` only in the
-`-infra` repos). Bringing every repo up to the full universal set is a deliberate
-fleet-reconciliation pass (its own workflow), gated per repo by the isolation check.
+**The clean, principle-level universal set is now mirrored fleet-wide and audited green.**
+The six-everywhere files (`isolation`, `identity-and-naming`, `repo-architecture`,
+`steering-consistency`, `workflow-orchestration`, `shell-discipline`) plus `kb-structure`
+in every `-kb` repo are byte-identical across all target repos — `scripts/steering-audit.ps1`
+reports OK on every (repo, file) pair, DRIFT=0, MISSING=0. The product repos
+(`mtuscanner`, `vpnalyzer-v2`, and the `mashtu` app repo) are correctly excluded.
+
+Still OUTSIDE this clean canonical set, by design: `security.md` / `msp-repo-model.md` /
+`search-discipline.md` / `workflow-worktree-cleanup.md` currently live tailored in the
+`-infra` repos and have NOT yet been extracted to clean, principle-level canonical copies
+here. Extracting each (so it too can be synced everywhere) is a follow-up, one file at a
+time: lift it to a client-naming-free canonical copy here, add it to BOTH script lists in
+the SAME change, then `steering-sync.ps1` → commit → `steering-audit.ps1`.
+
+A deeper enforcement follow-up (not yet built): a per-repo pre-commit hook that runs the
+audit and refuses to commit a drifted universal file — turning "remember to run sync" into
+"can't forget."
 
 ## See also
 
